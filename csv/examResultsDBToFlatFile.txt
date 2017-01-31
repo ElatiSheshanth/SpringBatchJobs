@@ -1,0 +1,4 @@
+1           ;studentName ;percentage  ;dob         
+2           ;Akashy      ;92.09       ;990         
+3           ;Rohan Kumar ;91.09       ;980         
+4           ;Elati Reddy ;90.09       ;970         

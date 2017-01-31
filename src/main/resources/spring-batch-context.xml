@@ -1,0 +1,136 @@
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:batch="http://www.springframework.org/schema/batch"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/batch	http://www.springframework.org/schema/batch/spring-batch-3.0.xsd
+		http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-4.0.xsd">
+
+	<import resource="classpath:context-datasource.xml" />
+
+	<!-- JobRepository and JobLauncher are configuration/setup classes -->
+	<bean id="jobRepository"
+		class="org.springframework.batch.core.repository.support.MapJobRepositoryFactoryBean" >
+	</bean>	
+
+	<bean id="jobLauncher"
+		class="org.springframework.batch.core.launch.support.SimpleJobLauncher">
+		<property name="jobRepository" ref="jobRepository" />
+	</bean>
+	
+	<!-- Step will need a transaction manager -->
+	<bean id="transactionManager" class="org.springframework.batch.support.transaction.ResourcelessTransactionManager" />
+	
+
+	<!-- 1. DataBase to FlatFile -->
+
+	<!-- ItemReader which reads from database and returns the row mapped by rowMapper -->
+	<bean id="databaseItemReader" class="org.springframework.batch.item.database.JdbcCursorItemReader">
+
+		<property name="dataSource" ref="dataSource" />
+		<!--  Case-Insensitive  -->
+		<property name="sql" value="SELECT ID,STUDENTNAME, PERCENTAGE, DOB FROM EXAM_RESULT" />
+		
+		<property name="rowMapper">
+			<bean class="com.springbatch.ExamResultRowMapper" />
+		</property>
+	</bean>
+
+	<!-- ItemWriter writes a line into output flat file -->
+	<bean id="flatFileItemWriter" class="org.springframework.batch.item.file.FlatFileItemWriter" scope="step">
+
+		<property name="resource" value="file:csv/examResultsDBToFlatFile.txt" />
+		<property name="lineAggregator">
+			<bean class="org.springframework.batch.item.file.transform.FormatterLineAggregator">
+				<property name="fieldExtractor">
+					<bean class="org.springframework.batch.item.file.transform.BeanWrapperFieldExtractor">
+						<property name="names" value="id, studentName, percentage, dob" />
+					</bean>
+				</property>
+				<property name="format" value="%-12s;%-12s;%-12s;%-12s" />
+			</bean>
+		</property>
+	</bean>
+
+	<!-- Optional JobExecutionListener to perform business logic before and after the job -->
+	<bean id="jobListener" class="com.springbatch.ExamResultJobListener" />
+
+	<!-- Optional ItemProcessor to perform business logic/filtering on the input records -->
+	<bean id="itemProcessor" class="com.springbatch.ExamResultItemProcessor" />
+
+	<!-- Job to fetch data from DB to store in FlatFile -->
+	<batch:job id="fetchExamResultJob">
+		<batch:step id="step1">
+			<batch:tasklet transaction-manager="transactionManager">
+				<batch:chunk reader="databaseItemReader" writer="flatFileItemWriter" processor="itemProcessor" commit-interval="10" />
+			</batch:tasklet>
+		</batch:step>
+		<batch:listeners>
+			<batch:listener ref="jobListener" />
+		</batch:listeners>
+	</batch:job>
+	
+	
+	
+	
+	
+	<!-- 2. FlatFile TO DataBase-->
+	
+	<bean id="databaseItemWriter" class="org.springframework.batch.item.database.JdbcBatchItemWriter">
+		<property name="dataSource" ref="dataSource" />
+		<property name="sql">
+		  <value>
+	           <![CDATA[        
+	            	insert into EXAM_RESULT(studentName,percentage,dob) values (:studentName,:percentage,:dob)
+	            ]]>
+		  </value>
+		</property>
+		
+		<!-- It will take care matching between object property and sql name parameter -->
+		<property name="itemSqlParameterSourceProvider">
+			<bean class="org.springframework.batch.item.database.BeanPropertyItemSqlParameterSourceProvider" />
+		</property>
+    </bean>
+    
+    <bean id="examResult" class="com.springbatch.model.ExamResult" scope="prototype"/>
+
+	<bean id="flatFileItemReader" class="org.springframework.batch.item.file.FlatFileItemReader">
+		<!-- Read a flat file -->
+		<property name="resource" value="file:csv/examResultsFlatFileToDB.txt" />
+		<property name="lineMapper">
+			<bean class="org.springframework.batch.item.file.mapping.DefaultLineMapper">
+			  <!-- split it -->
+				<property name="lineTokenizer">
+					<bean id="fixedLengthLineTokenizer" class="org.springframework.batch.item.file.transform.FixedLengthTokenizer">
+						<property name="names" value="studentName,percentage,dob" />
+						<property name="columns" value="1-11, 12-21, 22-24" />
+					</bean>
+				</property>
+			  <!-- <property name="lineTokenizer">
+			   	  <bean class="org.springframework.batch.item.file.transform.DelimitedLineTokenizer">
+					  <property name="names" value="studentName,percentage,dob" />
+					  <property name="delimiter" value=";"/>
+				 </bean>
+			  </property>-->
+			  <property name="fieldSetMapper">   
+				  <!-- map to an object -->
+				  <bean class="org.springframework.batch.item.file.mapping.BeanWrapperFieldSetMapper">
+					<property name="prototypeBeanName" value="examResult" />
+				  </bean>			
+			  </property>
+			  </bean>
+		  </property>
+     </bean>
+     
+     
+    <!-- Job to fetch data from FlatFile and store in DB --> 
+	<batch:job id="insertExamResultJob">
+    	<batch:step id="step2">
+    		<batch:tasklet transaction-manager="transactionManager">
+    			<batch:chunk reader="flatFileItemReader" writer="databaseItemWriter" commit-interval="10"/>
+    		</batch:tasklet>
+    	</batch:step>
+    	<batch:listeners>
+			<batch:listener ref="jobListener" />
+		</batch:listeners>
+    </batch:job>     
+	
+</beans>
